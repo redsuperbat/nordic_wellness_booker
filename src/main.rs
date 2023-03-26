@@ -1,4 +1,4 @@
-use std::{env, str::FromStr, thread::sleep};
+use std::{env, num::ParseIntError, str::FromStr, thread::sleep};
 
 use chrono::{FixedOffset, NaiveDateTime, TimeZone, Utc};
 use cron::Schedule;
@@ -107,8 +107,7 @@ fn book_activity(
         .send()
 }
 
-fn book_body_balance() {
-    let user_id = env::var("USER_ID").unwrap().parse::<u32>().unwrap();
+fn book_body_balance(user_id: u32) {
     let response = reqwest::blocking::get(get_bookings_url(&user_id.to_string())).unwrap();
     let dto: BookingsDto = serde_json::from_str(&response.text().unwrap()).unwrap();
     let body_balance_activity = dto
@@ -139,6 +138,20 @@ fn book_body_balance() {
     }
 }
 
+struct UserIds(Vec<u32>);
+
+impl FromStr for UserIds {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let ids = s
+            .split(",")
+            .filter_map(|it| it.parse::<u32>().ok())
+            .collect::<Vec<_>>();
+        Ok(Self { 0: ids })
+    }
+}
+
 fn main() {
     init_from_env(Env::new().default_filter_or("info"));
 
@@ -148,12 +161,15 @@ fn main() {
     let schedule = Schedule::from_str(every_sunday_at_1600).expect(&format!(
         "Unable to parse cron expression {every_sunday_at_1600}"
     ));
+    let user_ids = env::var("USER_IDS").unwrap().parse::<UserIds>().unwrap();
 
     for next_time in schedule.upcoming(swe_tz) {
         let now = swe_tz.from_utc_datetime(&Utc::now().naive_utc());
         let wait_time = next_time - now;
         let sleep_sec = core::time::Duration::from_secs(wait_time.num_seconds() as u64);
         sleep(sleep_sec);
-        book_body_balance();
+        for id in &user_ids.0 {
+            book_body_balance(*id);
+        }
     }
 }
