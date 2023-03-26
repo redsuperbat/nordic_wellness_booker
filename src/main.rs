@@ -1,7 +1,8 @@
-use std::{env, num::ParseIntError, str::FromStr, thread::sleep};
+use std::{env, str::FromStr, thread::sleep};
 
 use chrono::{FixedOffset, NaiveDateTime, TimeZone, Utc};
 use cron::Schedule;
+use cron_descriptor::cronparser::cron_expression_descriptor::get_description_cron;
 use env_logger::{init_from_env, Env};
 use log::{error, info};
 use reqwest::StatusCode;
@@ -161,7 +162,17 @@ fn main() {
     let schedule = Schedule::from_str(every_sunday_at_1600).expect(&format!(
         "Unable to parse cron expression {every_sunday_at_1600}"
     ));
-    let user_ids = env::var("USER_IDS").unwrap().parse::<UserIds>().unwrap();
+    let readable_schedule = get_description_cron(every_sunday_at_1600)
+        .expect("Unable to parse cron expression {every_sunday_at_1600}");
+    let user_ids = env::var("USER_IDS")
+        .expect("Missing env var USER_IDS")
+        .parse::<UserIds>()
+        .expect("env var USER_IDS must be in the format 'USER_IDS=1234,12345'");
+
+    info!(
+        "Automatic booker for users {:?} {}",
+        user_ids.0, readable_schedule
+    );
 
     for next_time in schedule.upcoming(swe_tz) {
         let now = swe_tz.from_utc_datetime(&Utc::now().naive_utc());
@@ -171,5 +182,6 @@ fn main() {
         for id in &user_ids.0 {
             book_body_balance(*id);
         }
+        sleep(core::time::Duration::from_secs(5 * 60));
     }
 }
