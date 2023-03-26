@@ -1,4 +1,4 @@
 # Nordic Wellness Booker
 
-This service books gym classes automatically for me using the undocumented Nordic Wellness API.
+A service that books gym classes automatically using the undocumented Nordic Wellness API.
 
