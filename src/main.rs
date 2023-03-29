@@ -4,6 +4,7 @@ use chrono::{FixedOffset, NaiveDateTime, TimeZone, Utc};
 use cron::Schedule;
 use cron_descriptor::cronparser::cron_expression_descriptor::get_description_cron;
 use env_logger::{init_from_env, Env};
+use eyre::{Error, Result};
 use log::{error, info};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
@@ -27,13 +28,13 @@ pub struct GroupActivity {
     #[serde(rename = "Message")]
     message: Option<String>,
     #[serde(rename = "Status")]
-    status: Status,
+    status: String,
     #[serde(rename = "StartTime")]
     start_time: String,
     #[serde(rename = "EndTime")]
     end_time: String,
     #[serde(rename = "Location")]
-    location: Location,
+    location: String,
     #[serde(rename = "Instructor")]
     instructor: String,
     #[serde(rename = "InstructorId")]
@@ -46,27 +47,6 @@ pub struct GroupActivity {
     drops_amount: i64,
     #[serde(rename = "BookingId")]
     booking_id: Option<serde_json::Value>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub enum Location {
-    #[serde(rename = "Gym Torsvik")]
-    GymTorsvik,
-    #[serde(rename = "Sal A Torsvik")]
-    SalATorsvik,
-    #[serde(rename = "Sal B Torsvik")]
-    SalBTorsvik,
-    #[serde(rename = "Sal C Torsvik")]
-    SalCTorsvik,
-    #[serde(rename = "Sal Easy Line Torsvik")]
-    SalEasyLineTorsvik,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub enum Status {
-    Bookable,
-    Unavailable,
-    Booked,
 }
 
 fn get_nw_date(time: &NaiveDateTime) -> String {
@@ -108,9 +88,9 @@ fn book_activity(
         .send()
 }
 
-fn book_body_balance(user_id: u32) {
-    let response = reqwest::blocking::get(get_bookings_url(&user_id.to_string())).unwrap();
-    let dto: BookingsDto = serde_json::from_str(&response.text().unwrap()).unwrap();
+fn book_body_balance(user_id: u32) -> Result<()> {
+    let response = reqwest::blocking::get(get_bookings_url(&user_id.to_string()))?;
+    let dto: BookingsDto = serde_json::from_str(&response.text()?)?;
     let body_balance_activity = dto
         .group_activities
         .iter()
@@ -120,7 +100,7 @@ fn book_body_balance(user_id: u32) {
         None => {
             error!("Unable to find activity with the correct name");
             error!("Available activities: {:?}", dto);
-            return;
+            return Ok(());
         }
     };
     info!(
@@ -128,14 +108,32 @@ fn book_body_balance(user_id: u32) {
         activity.name, activity.start_time
     );
 
-    let response = book_activity(activity.id as u32, user_id);
-    match response {
-        Ok(res) => match res.status() {
-            StatusCode::OK => info!("Booked {}", activity.name),
-            StatusCode::BAD_REQUEST => info!("BAD_REQUEST: {}", res.text().unwrap()),
-            code => error!("Encountered status code {code} which is not handled!"),
-        },
-        Err(e) => error!("Booking failed with error {}", e),
+    let response = book_activity(activity.id as u32, user_id)?;
+    let status = response.status();
+    let text = response.text()?;
+    info!("Status Code {}", status.as_str());
+    info!("{}", text);
+    if StatusCode::OK != status {
+        return Err(Error::msg(format!(
+            "Unhandled status code {}",
+            status.as_str()
+        )));
+    }
+    info!("Booked {}", activity.name);
+    Ok(())
+}
+
+fn run_booking(user_id: u32, num_retries: u8) -> Result<()> {
+    if num_retries == 0 {
+        return Err(Error::msg("Unable to book body balance"));
+    } else {
+        match book_body_balance(user_id) {
+            Ok(_) => return Ok(()),
+            Err(e) => {
+                error!("{}", e.to_string());
+                run_booking(user_id, num_retries - 1)
+            }
+        }
     }
 }
 
@@ -180,7 +178,7 @@ fn main() {
         let sleep_sec = core::time::Duration::from_secs(wait_time.num_seconds() as u64);
         sleep(sleep_sec);
         for id in &user_ids.0 {
-            book_body_balance(*id);
+            run_booking(*id, 5).expect("Unable to book!");
         }
         sleep(core::time::Duration::from_secs(5 * 60));
     }
