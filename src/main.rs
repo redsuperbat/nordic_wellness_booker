@@ -145,7 +145,7 @@ impl FromStr for UserIds {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let ids = s
             .split(",")
-            .filter_map(|it| it.parse::<u32>().ok())
+            .filter_map(|it| it.trim().parse::<u32>().ok())
             .collect::<Vec<_>>();
         Ok(Self { 0: ids })
     }
