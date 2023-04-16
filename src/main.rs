@@ -173,25 +173,22 @@ async fn main() -> Result<()> {
             format!("Bearer {}", rsb_config_api_key.trim()),
         )
         .send()
-        .await
-        .expect("unable to get config")
+        .await?
         .text()
-        .await
-        .expect("unable to get response text");
+        .await?;
 
-    let config =
-        serde_json::from_str::<ConfigActivities>(&config_response).expect("unable to deserialize");
+    let config = serde_json::from_str::<ConfigActivities>(&config_response)?;
 
     for activity in config.activities {
         tokio::task::spawn(async move {
             // create a timezone instance of UTC+2 = Sweden
             let swe_tz = FixedOffset::east_opt(2 * 3600).expect("Time out of bounds");
             let schedule = Schedule::from_str(&activity.cron_time).expect(&format!(
-                "Unable to parse cron expression {}",
+                "unable to parse cron expression {}",
                 &activity.cron_time
             ));
             let readable_schedule = get_description_cron(&activity.cron_time)
-                .expect("Unable to parse cron expression {every_sunday_at_1600}");
+                .expect("unable to get readable cron expression");
 
             info!(
                 "automatic booker triggering [{}] for {} ({}) and activity [{}] ",
