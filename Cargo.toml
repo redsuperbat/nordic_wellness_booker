@@ -6,13 +6,16 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-chrono = "0.4.24"
+async-recursion = "1.0.4"
+chrono = {version = "0.4.24", features = ["clock","std"]}
 cron = "0.12.0"
 cron-descriptor = "0.1.1"
 env_logger = "0.10.0"
 eyre = "0.6.8"
+humantime = "2.1.0"
 log = "0.4.17"
-reqwest = {version = "0.11.15", features = ["blocking"]}
-serde = {version = "1.0.158", features = ["derive"]}
+reqwest = { version = "0.11.15" }
+serde = { version = "1.0.158", features = ["derive"] }
 serde_json = "1.0.94"
 serde_urlencoded = "0.7.1"
+tokio = { version = "1.27.0", features = ["full"] }

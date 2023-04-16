@@ -1,10 +1,12 @@
-use std::{env, str::FromStr, thread::sleep};
+use std::{env, str::FromStr};
 
-use chrono::{FixedOffset, NaiveDateTime, TimeZone, Utc};
+use async_recursion::async_recursion;
+use chrono::{Duration, FixedOffset, NaiveDateTime, TimeZone, Utc};
 use cron::Schedule;
 use cron_descriptor::cronparser::cron_expression_descriptor::get_description_cron;
 use env_logger::{init_from_env, Env};
 use eyre::{Error, Result};
+use humantime::format_duration;
 use log::{error, info};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
@@ -67,35 +69,36 @@ fn get_bookings_url(user_id: &str) -> String {
     format!("https://api1.nordicwellness.se/GroupActivity/timeslot?clubIds=1&activities=&dates={today}%2C{in_one_week}&time=&employees=&times=09%3A00-11%3A00%2C17%3A00-22%3A00&datespan=true&userId={user_id}")
 }
 
-fn book_activity(
+async fn book_activity(
     activity_id: u32,
     user_id: u32,
-) -> Result<reqwest::blocking::Response, reqwest::Error> {
+) -> Result<reqwest::Response, reqwest::Error> {
     let url = "https://api1.nordicwellness.se/Booking";
-    let client = reqwest::blocking::Client::new();
+    let client = reqwest::Client::new();
     let body_data = (
         ("ActivityId", activity_id),
         ("UserId", user_id),
         ("QueueType", "ordinary"),
     );
 
-    let body = reqwest::blocking::Body::from(serde_urlencoded::to_string(body_data).unwrap());
+    let body = reqwest::Body::from(serde_urlencoded::to_string(body_data).unwrap());
 
     client
         .post(url)
         .header("Content-Type", "application/x-www-form-urlencoded")
         .body(body)
         .send()
+        .await
 }
 
-fn book_body_balance(user_id: u32) -> Result<()> {
-    let response = reqwest::blocking::get(get_bookings_url(&user_id.to_string()))?;
-    let dto: BookingsDto = serde_json::from_str(&response.text()?)?;
+async fn find_activity_by_name(activity: BookableActivity) -> Result<()> {
+    let response = reqwest::get(get_bookings_url(&activity.user_id.to_string())).await?;
+    let dto: BookingsDto = serde_json::from_str(&response.text().await?)?;
     let body_balance_activity = dto
         .group_activities
         .iter()
-        .find(|it| it.name == "BODYBALANCE® 60");
-    let activity = match body_balance_activity {
+        .find(|it| it.name == activity.name && it.start_time.ends_with(&activity.start_time));
+    let nw_activity = match body_balance_activity {
         Some(it) => it,
         None => {
             error!("Unable to find activity with the correct name");
@@ -105,12 +108,12 @@ fn book_body_balance(user_id: u32) -> Result<()> {
     };
     info!(
         "Found {} starting at time {}. Attempting to book it!",
-        activity.name, activity.start_time
+        nw_activity.name, nw_activity.start_time
     );
 
-    let response = book_activity(activity.id as u32, user_id)?;
+    let response = book_activity(nw_activity.id as u32, activity.user_id).await?;
     let status = response.status();
-    let text = response.text()?;
+    let text = response.text().await?;
     info!("Status Code {}", status.as_str());
     info!("{}", text);
     if StatusCode::OK != status {
@@ -119,67 +122,104 @@ fn book_body_balance(user_id: u32) -> Result<()> {
             status.as_str()
         )));
     }
-    info!("Booked {}", activity.name);
+    info!("Booked {}", nw_activity.name);
     Ok(())
 }
 
-fn run_booking(user_id: u32, num_retries: u8) -> Result<()> {
+#[async_recursion]
+async fn run_booking(activity: BookableActivity, num_retries: u8) -> Result<()> {
     if num_retries == 0 {
-        return Err(Error::msg("Unable to book body balance"));
+        return Err(Error::msg(activity.name.clone()));
     } else {
-        match book_body_balance(user_id) {
+        match find_activity_by_name(activity.clone()).await {
             Ok(_) => return Ok(()),
             Err(e) => {
                 error!("{}", e.to_string());
-                run_booking(user_id, num_retries - 1)
+                run_booking(activity, num_retries - 1).await
             }
         }
     }
 }
 
-struct UserIds(Vec<u32>);
-
-impl FromStr for UserIds {
-    type Err = ();
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let ids = s
-            .split(",")
-            .filter_map(|it| it.trim().parse::<u32>().ok())
-            .collect::<Vec<_>>();
-        Ok(Self { 0: ids })
-    }
+#[derive(Serialize, Deserialize, Clone)]
+struct BookableActivity {
+    name: String,
+    cron_time: String,
+    user_id: u32,
+    start_time: String,
+    user_name: String,
 }
 
-fn main() {
+#[derive(Serialize, Deserialize)]
+struct ConfigActivities {
+    activities: Vec<BookableActivity>,
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
     init_from_env(Env::new().default_filter_or("info"));
+    let rsb_config_url = env::var("RSB_CONFIG_URL").expect("no config url was provided");
+    let rsb_config_api_key =
+        env::var("RSB_CONFIG_API_KEY").expect("no config api key was provided");
+    let client = reqwest::Client::new();
 
-    let every_sunday_at_1600 = "0 15 12 * * Sun *";
-    // create a timezone instance of UTC+2 = Sweden
-    let swe_tz = FixedOffset::east_opt(2 * 3600).expect("Time out of bounds");
-    let schedule = Schedule::from_str(every_sunday_at_1600).expect(&format!(
-        "Unable to parse cron expression {every_sunday_at_1600}"
-    ));
-    let readable_schedule = get_description_cron(every_sunday_at_1600)
-        .expect("Unable to parse cron expression {every_sunday_at_1600}");
-    let user_ids = env::var("USER_IDS")
-        .expect("Missing env var USER_IDS")
-        .parse::<UserIds>()
-        .expect("env var USER_IDS must be in the format 'USER_IDS=1234,12345'");
+    let config_response = client
+        .get(format!(
+            "{}/api/config/nordic-wellness-pass.json",
+            rsb_config_url
+        ))
+        .header(
+            "Authorization",
+            format!("Bearer {}", rsb_config_api_key.trim()),
+        )
+        .send()
+        .await
+        .expect("unable to get config")
+        .text()
+        .await
+        .expect("unable to get response text");
 
-    info!(
-        "Automatic booker for users {:?} {}",
-        user_ids.0, readable_schedule
-    );
+    let config =
+        serde_json::from_str::<ConfigActivities>(&config_response).expect("unable to deserialize");
 
-    for next_time in schedule.upcoming(swe_tz) {
-        let now = swe_tz.from_utc_datetime(&Utc::now().naive_utc());
-        let wait_time = next_time - now;
-        let sleep_sec = core::time::Duration::from_secs(wait_time.num_seconds() as u64);
-        sleep(sleep_sec);
-        for id in &user_ids.0 {
-            run_booking(*id, 5).expect("Unable to book!");
-        }
-        sleep(core::time::Duration::from_secs(5 * 60));
+    for activity in config.activities {
+        tokio::task::spawn(async move {
+            // create a timezone instance of UTC+2 = Sweden
+            let swe_tz = FixedOffset::east_opt(2 * 3600).expect("Time out of bounds");
+            let schedule = Schedule::from_str(&activity.cron_time).expect(&format!(
+                "Unable to parse cron expression {}",
+                &activity.cron_time
+            ));
+            let readable_schedule = get_description_cron(&activity.cron_time)
+                .expect("Unable to parse cron expression {every_sunday_at_1600}");
+
+            info!(
+                "automatic booker triggering [{}] for {} ({}) and activity [{}] ",
+                &readable_schedule, &activity.user_name, &activity.user_id, &activity.name,
+            );
+
+            for next_time in schedule.upcoming(swe_tz) {
+                let activity = activity.clone();
+                let now = swe_tz.from_utc_datetime(&Utc::now().naive_utc());
+                let wait_time = next_time - now;
+                let sleep_sec = core::time::Duration::from_secs(wait_time.num_seconds() as u64);
+                let wait_time_readable = format_duration(wait_time.to_std().unwrap()).to_string();
+                info!(
+                    "waiting {} until next check for activity {}",
+                    &wait_time_readable, &activity.name
+                );
+                tokio::time::sleep(sleep_sec).await;
+                run_booking(activity, 5).await.expect("Unable to book!");
+                tokio::time::sleep(core::time::Duration::from_secs(5 * 60)).await;
+            }
+        });
     }
+    tokio::task::spawn_blocking(|| {
+        let duration = Duration::days(365)
+            .to_std()
+            .expect("could not convert chrono to std time");
+        std::thread::sleep(duration);
+    })
+    .await?;
+    Ok(())
 }
