@@ -63,10 +63,10 @@ fn get_nw_date(time: &NaiveDateTime) -> String {
 
 fn get_bookings_url(user_id: &str) -> String {
     let now = Utc::now().naive_utc();
-    let today = get_nw_date(&now);
+    let in_six_days = get_nw_date(&(now + Duration::days(6)));
     let in_one_week = get_nw_date(&(now + chrono::Duration::weeks(1)));
-    info!("Fetching activities between {today} and {in_one_week}");
-    format!("https://api1.nordicwellness.se/GroupActivity/timeslot?clubIds=1&activities=&dates={today}%2C{in_one_week}&time=&employees=&times=09%3A00-11%3A00%2C17%3A00-22%3A00&datespan=true&userId={user_id}")
+    info!("Fetching activities between {in_six_days} and {in_one_week}");
+    format!("https://api1.nordicwellness.se/GroupActivity/timeslot?clubIds=1&activities=&dates={in_six_days}%2C{in_one_week}&time=&employees=&times=09%3A00-11%3A00%2C17%3A00-22%3A00&datespan=true&userId={user_id}")
 }
 
 async fn book_activity(
@@ -94,15 +94,17 @@ async fn book_activity(
 async fn find_activity_by_name(activity: BookableActivity) -> Result<()> {
     let response = reqwest::get(get_bookings_url(&activity.user_id.to_string())).await?;
     let dto: BookingsDto = serde_json::from_str(&response.text().await?)?;
-    let body_balance_activity = dto
-        .group_activities
-        .iter()
-        .find(|it| it.name == activity.name && it.start_time.ends_with(&activity.start_time));
+    let body_balance_activity = dto.group_activities.iter().find(|it| {
+        it.name == activity.name
+            && it.start_time.ends_with(&activity.start_time)
+            && it.status == "Bookable"
+    });
     let nw_activity = match body_balance_activity {
         Some(it) => it,
         None => {
             error!("Unable to find activity with the correct name");
-            error!("Available activities: {:?}", dto);
+            let json = serde_json::to_string_pretty(&dto).unwrap();
+            error!("{}", json);
             return Ok(());
         }
     };
@@ -135,6 +137,8 @@ async fn run_booking(activity: BookableActivity, num_retries: u8) -> Result<()> 
             Ok(_) => return Ok(()),
             Err(e) => {
                 error!("{}", e.to_string());
+                info!("retrying again in 1 minute");
+                tokio::time::sleep(Duration::minutes(1).to_std().unwrap()).await;
                 run_booking(activity, num_retries - 1).await
             }
         }
@@ -206,8 +210,8 @@ async fn main() -> Result<()> {
                     &wait_time_readable, &activity.name
                 );
                 tokio::time::sleep(sleep_sec).await;
-                run_booking(activity, 5).await.expect("Unable to book!");
-                tokio::time::sleep(core::time::Duration::from_secs(5 * 60)).await;
+                run_booking(activity, 15).await.expect("Unable to book!");
+                tokio::time::sleep(Duration::minutes(5).to_std().unwrap()).await;
             }
         });
     }
