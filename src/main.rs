@@ -1,7 +1,7 @@
 use std::{env, str::FromStr};
 
 use async_recursion::async_recursion;
-use chrono::{Duration, FixedOffset, NaiveDateTime, TimeZone, Utc};
+use chrono::{Duration, FixedOffset, Local, NaiveDateTime, TimeZone, Utc};
 use cron::Schedule;
 use cron_descriptor::cronparser::cron_expression_descriptor::get_description_cron;
 use env_logger::{init_from_env, Env};
@@ -201,7 +201,7 @@ async fn main() -> Result<()> {
 
             for next_time in schedule.upcoming(swe_tz) {
                 let activity = activity.clone();
-                let now = swe_tz.from_utc_datetime(&Utc::now().naive_utc());
+                let now = Local::now().with_timezone(&swe_tz);
                 let wait_time = next_time - now;
                 let sleep_sec = core::time::Duration::from_secs(wait_time.num_seconds() as u64);
                 let wait_time_readable = format_duration(wait_time.to_std().unwrap()).to_string();

@@ -18,4 +18,7 @@ WORKDIR /app
 
 COPY --from=builder /app/target/release/nordic_wellness_booker .
 
+ENV TZ=Europe/Stockholm
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
 CMD ["./nordic_wellness_booker"]
