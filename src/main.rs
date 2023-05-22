@@ -112,7 +112,7 @@ async fn find_activity_by_name(activity: BookableActivity) -> Result<()> {
         }
     };
     info!(
-        "Found {} starting at time {}. Attempting to book it!",
+        "Found {} starting at time {}. Attempting to book it",
         nw_activity.name, nw_activity.start_time
     );
 

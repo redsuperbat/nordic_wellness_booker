@@ -11,9 +11,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
 
@@ -27,9 +24,10 @@ jobs:
         id: sha
         run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
-      - name: Build and push
-        uses: docker/build-push-action@v3
+      - uses: docker/build-push-action@v3
         with:
+          context: .
           push: true
           tags: maxrsb/nordic_wellness_booker:${{ steps.sha.outputs.short }}, maxrsb/nordic_wellness_booker:latest
-          context: .
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
