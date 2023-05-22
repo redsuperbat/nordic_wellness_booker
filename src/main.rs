@@ -102,7 +102,10 @@ async fn find_activity_by_name(activity: BookableActivity) -> Result<()> {
     let nw_activity = match body_balance_activity {
         Some(it) => it,
         None => {
-            error!("Unable to find activity with the correct name");
+            error!(
+                "Unable to find activity with name {} start time {} and status {}",
+                &activity.name, &activity.start_time, "Bookable"
+            );
             let json = serde_json::to_string_pretty(&dto).unwrap();
             error!("{}", json);
             return Ok(());
