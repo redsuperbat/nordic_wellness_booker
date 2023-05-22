@@ -1,4 +1,4 @@
-use std::{env, str::FromStr};
+use std::{env, fmt::Display, str::FromStr};
 
 use async_recursion::async_recursion;
 use chrono::{Duration, FixedOffset, Local, NaiveDateTime, TimeZone, Utc};
@@ -148,7 +148,7 @@ async fn run_booking(activity: BookableActivity, num_retries: u8) -> Result<()> 
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 struct BookableActivity {
     name: String,
     cron_time: String,
@@ -157,7 +157,7 @@ struct BookableActivity {
     user_name: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct ConfigActivities {
     activities: Vec<BookableActivity>,
 }
@@ -183,6 +183,8 @@ async fn main() -> Result<()> {
         .await?
         .text()
         .await?;
+
+    info!("fetched activities {}", &config_response);
 
     let config = serde_json::from_str::<ConfigActivities>(&config_response)?;
 
