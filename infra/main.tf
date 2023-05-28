@@ -29,7 +29,6 @@ data "terraform_remote_state" "rsb_config"  {
   }
 } 
 
-
 variable "image_tag" {
   type = string
 }
@@ -37,9 +36,6 @@ variable "image_tag" {
 variable "rsb_config_api_key" {
   type = string
 }
-
-
-
 
 resource "kubernetes_namespace_v1" "nordic_wellness_booker_ns" {
   metadata {
@@ -98,5 +94,4 @@ resource "kubernetes_deployment_v1" "nordic_wellness_booker_deploy" {
       }
     }
   }
-
 }
