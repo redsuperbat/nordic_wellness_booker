@@ -20,14 +20,33 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Set outputs
-        id: sha
-        run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-
       - uses: docker/build-push-action@v3
         with:
           context: .
           push: true
-          tags: maxrsb/nordic_wellness_booker:${{ steps.sha.outputs.short }}, maxrsb/nordic_wellness_booker:latest
+          tags: maxrsb/nordic_wellness_booker:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Setup Terraform CLI
+        uses: hashicorp/setup-terraform@v2
+
+      - name: Write kubeconfig to ~/.kube/config
+        run: |
+          mkdir ~/.kube
+          echo '${{ secrets.KUBE_CONFIG }}' > ~/.kube/config
+
+      - name: Terraform init, validate, plan and apply
+        run: |
+          cd infra/terraform/app
+          echo "** Running Terraform Init**"
+          terraform init
+
+          echo "** Running Terraform Validate**"
+          terraform validate
+
+          echo "** Running Terraform Plan**"
+          terraform plan -var="image_tag=${{ github.sha }}"
+
+          echo "** Running Terraform Apply**"
+          terraform apply -auto-approve -var="image_tag=${{ github.sha }}"
