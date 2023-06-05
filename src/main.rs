@@ -95,7 +95,7 @@ async fn find_activity_by_name(activity: BookableActivity) -> Result<()> {
     let response = reqwest::get(get_bookings_url(&activity.user_id.to_string())).await?;
     let dto: BookingsDto = serde_json::from_str(&response.text().await?)?;
     let body_balance_activity = dto.group_activities.iter().find(|it| {
-        it.name == activity.name
+        it.name.contains(&activity.name)
             && it.start_time.ends_with(&activity.start_time)
             && it.status == "Bookable"
     });
