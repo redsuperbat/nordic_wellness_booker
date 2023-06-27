@@ -39,7 +39,7 @@ jobs:
 
       - name: Terraform init, validate, plan and apply
         run: |
-          cd infra/terraform/app
+          cd infra
           echo "** Running Terraform Init**"
           terraform init
 
