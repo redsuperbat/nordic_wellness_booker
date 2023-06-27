@@ -20,14 +20,14 @@ locals {
   name      = "nordic-wellness-booker"
 }
 
-data "terraform_remote_state" "rsb_config"  {
+data "terraform_remote_state" "rsb_config" {
   backend = "kubernetes"
   config = {
-    namespace = "terraform-backend"
+    namespace     = "terraform-backend"
     secret_suffix = "rsb-config"
-    config_path = "~/.kube/config"
+    config_path   = "~/.kube/config"
   }
-} 
+}
 
 variable "image_tag" {
   type = string
@@ -85,6 +85,11 @@ resource "kubernetes_deployment_v1" "nordic_wellness_booker_deploy" {
             }
           }
           resources {
+            requests = {
+              cpu    = "20m"
+              memory = "5Mi"
+            }
+
             limits = {
               cpu    = "100m"
               memory = "20Mi"
