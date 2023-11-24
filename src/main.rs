@@ -195,7 +195,7 @@ fn parse_weekday(value: &str) -> Option<Weekday> {
     }
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     init_from_env(Env::new().default_filter_or("info"));
 
