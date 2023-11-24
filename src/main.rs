@@ -1,7 +1,8 @@
-use std::{env, fmt::Display, str::FromStr};
+use std::io::Read;
+use std::{fs::File, str::FromStr};
 
 use async_recursion::async_recursion;
-use chrono::{Duration, FixedOffset, Local, NaiveDateTime, TimeZone, Utc};
+use chrono::{Datelike, Duration, FixedOffset, Local, NaiveDateTime, TimeZone, Utc, Weekday};
 use cron::Schedule;
 use cron_descriptor::cronparser::cron_expression_descriptor::get_description_cron;
 use env_logger::{init_from_env, Env};
@@ -9,6 +10,7 @@ use eyre::{Error, Result};
 use humantime::format_duration;
 use log::{error, info};
 use reqwest::StatusCode;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -61,12 +63,12 @@ fn get_nw_date(time: &NaiveDateTime) -> String {
         .to_string()
 }
 
-fn get_bookings_url(user_id: &str) -> String {
+fn get_bookings_url(user_id: &str, activity_id: &str) -> String {
     let now = Utc::now().naive_utc();
-    let in_six_days = get_nw_date(&(now + Duration::days(6)));
+    let today = get_nw_date(&now);
     let in_one_week = get_nw_date(&(now + chrono::Duration::weeks(1)));
-    info!("Fetching activities between {in_six_days} and {in_one_week}");
-    format!("https://api1.nordicwellness.se/GroupActivity/timeslot?clubIds=1&activities=&dates={in_six_days}%2C{in_one_week}&time=&employees=&times=09%3A00-11%3A00%2C17%3A00-22%3A00&datespan=true&userId={user_id}")
+    info!("Fetching activities between {today} and {in_one_week}");
+    format!("https://api1.nordicwellness.se/GroupActivity/timeslot?clubIds=1&activities={activity_id}&dates={today}%2C{in_one_week}&time=&employees=&times=09%3A00-11%3A00%2C17%3A00-22%3A00&datespan=true&userId={user_id}")
 }
 
 async fn book_activity(
@@ -91,20 +93,36 @@ async fn book_activity(
         .await
 }
 
+fn parse_date(date_str: &str) -> Option<NaiveDateTime> {
+    match NaiveDateTime::parse_from_str(date_str, "%Y-%m-%dT%H:%M:%S") {
+        Ok(parsed_datetime) => Some(parsed_datetime),
+        Err(_) => None,
+    }
+}
+
 async fn find_activity_by_name(activity: BookableActivity) -> Result<()> {
-    let response = reqwest::get(get_bookings_url(&activity.user_id.to_string())).await?;
+    let response = reqwest::get(get_bookings_url(
+        &activity.user_id.to_string(),
+        &activity.id,
+    ))
+    .await?;
     let dto: BookingsDto = serde_json::from_str(&response.text().await?)?;
     let body_balance_activity = dto.group_activities.iter().find(|it| {
-        it.name.contains(&activity.name)
-            && it.start_time.ends_with(&activity.start_time)
-            && it.status == "Bookable"
+        let same_name = it
+            .name
+            .to_lowercase()
+            .contains(&activity.name.to_lowercase());
+        let correct_day =
+            parse_date(&it.start_time).unwrap().weekday() == parse_weekday(&activity.day).unwrap();
+        let correct_status = it.status == "Bookable";
+        same_name && correct_day && correct_status
     });
     let nw_activity = match body_balance_activity {
         Some(it) => it,
         None => {
             error!(
-                "Unable to find activity with name {} start time {} and status {}",
-                &activity.name, &activity.start_time, "Bookable"
+                "Unable to find activity with name {} day {} and status {}",
+                &activity.name, &activity.day, "Bookable"
             );
             let json = serde_json::to_string_pretty(&dto).unwrap();
             error!("{}", json);
@@ -119,14 +137,11 @@ async fn find_activity_by_name(activity: BookableActivity) -> Result<()> {
     let response = book_activity(nw_activity.id as u32, activity.user_id).await?;
     let status = response.status();
     let text = response.text().await?;
-    info!("Status Code {}", status.as_str());
-    info!("{}", text);
-    if StatusCode::OK != status {
-        return Err(Error::msg(format!(
-            "Unhandled status code {}",
-            status.as_str()
-        )));
+    if status != StatusCode::OK {
+        let err_msg = format!("code {}: {}", status.as_str(), text,);
+        return Err(Error::msg(err_msg));
     }
+    info!("{}", text);
     info!("Booked {}", nw_activity.name);
     Ok(())
 }
@@ -148,47 +163,45 @@ async fn run_booking(activity: BookableActivity, num_retries: u8) -> Result<()> 
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+fn read_json<T: DeserializeOwned>(path: &str) -> T {
+    let mut file = File::open(path).unwrap();
+    let mut contents = String::new();
+    file.read_to_string(&mut contents)
+        .expect("unable to read file");
+
+    serde_json::from_str::<T>(&contents).expect("unable to deserialize json")
+}
+
+#[derive(Deserialize, Clone, Debug)]
 struct BookableActivity {
     name: String,
+    id: String,
     cron_time: String,
     user_id: u32,
-    start_time: String,
+    day: String,
     user_name: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-struct ConfigActivities {
-    activities: Vec<BookableActivity>,
+fn parse_weekday(value: &str) -> Option<Weekday> {
+    match value.to_lowercase().as_str() {
+        "sun" | "sunday" => Some(Weekday::Sun),
+        "mon" | "monday" => Some(Weekday::Mon),
+        "tue" | "tuesday" => Some(Weekday::Tue),
+        "wed" | "wednesday" => Some(Weekday::Wed),
+        "thu" | "thursday" => Some(Weekday::Thu),
+        "fri" | "friday" => Some(Weekday::Fri),
+        "sat" | "saturday" => Some(Weekday::Sat),
+        _ => None,
+    }
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     init_from_env(Env::new().default_filter_or("info"));
-    let rsb_config_url = env::var("RSB_CONFIG_URL").expect("no config url was provided");
-    let rsb_config_api_key =
-        env::var("RSB_CONFIG_API_KEY").expect("no config api key was provided");
-    let client = reqwest::Client::new();
 
-    let config_response = client
-        .get(format!(
-            "{}/api/config/nordic-wellness-pass.json",
-            rsb_config_url
-        ))
-        .header(
-            "Authorization",
-            format!("Bearer {}", rsb_config_api_key.trim()),
-        )
-        .send()
-        .await?
-        .text()
-        .await?;
+    let bookable_activities: Vec<BookableActivity> = read_json("./assets/bookable-activities.json");
 
-    info!("fetched activities {}", &config_response);
-
-    let config = serde_json::from_str::<ConfigActivities>(&config_response)?;
-
-    for activity in config.activities {
+    for activity in bookable_activities {
         tokio::task::spawn(async move {
             // create a timezone instance of UTC+2 = Sweden
             let swe_tz = FixedOffset::east_opt(2 * 3600).expect("Time out of bounds");
@@ -215,7 +228,7 @@ async fn main() -> Result<()> {
                     &wait_time_readable, &activity.name
                 );
                 tokio::time::sleep(sleep_sec).await;
-                run_booking(activity, 15).await.expect("Unable to book!");
+                run_booking(activity, 3).await.expect("Unable to book!");
                 tokio::time::sleep(Duration::minutes(5).to_std().unwrap()).await;
             }
         });

@@ -16,7 +16,7 @@ provider "kubernetes" {
 }
 
 locals {
-  namespace = "nordic-wellness-booker"
+  namespace = "rsb-services"
   name      = "nordic-wellness-booker"
 }
 
@@ -39,19 +39,18 @@ variable "rsb_config_api_key" {
 
 resource "kubernetes_namespace_v1" "nordic_wellness_booker_ns" {
   metadata {
-    name = local.namespace
+    name = local.name
   }
 }
 
 
-resource "kubernetes_secret_v1" "env" {
+resource "kubernetes_config_map_v1" "config_map" {
   metadata {
     name      = local.name
     namespace = local.namespace
   }
   data = {
-    RSB_CONFIG_URL     = data.terraform_remote_state.rsb_config.outputs.rsb_config_url
-    RSB_CONFIG_API_KEY = var.rsb_config_api_key
+    bookable_activities = file("${path.module}/../assets/bookable-activities.json")
   }
 }
 
@@ -79,10 +78,9 @@ resource "kubernetes_deployment_v1" "nordic_wellness_booker_deploy" {
         container {
           name  = local.name
           image = "maxrsb/nordic_wellness_booker:${var.image_tag}"
-          env_from {
-            secret_ref {
-              name = kubernetes_secret_v1.env.metadata[0].name
-            }
+          volume_mount {
+            name       = kubernetes_config_map_v1.config_map.metadata[0].name
+            mount_path = "/assets/bookable-activities.json"
           }
           resources {
             requests = {
@@ -94,6 +92,13 @@ resource "kubernetes_deployment_v1" "nordic_wellness_booker_deploy" {
               cpu    = "100m"
               memory = "20Mi"
             }
+          }
+        }
+
+        volume {
+          name = kubernetes_config_map_v1.config_map.metadata[0].name
+          config_map {
+            name = kubernetes_config_map_v1.config_map.metadata[0].name
           }
         }
       }
