@@ -1,7 +1,6 @@
 use std::io::Read;
 use std::{fs::File, str::FromStr};
 
-use async_recursion::async_recursion;
 use chrono::{Datelike, Duration, FixedOffset, Local, NaiveDateTime, TimeZone, Utc, Weekday};
 use cron::Schedule;
 use cron_descriptor::cronparser::cron_expression_descriptor::get_description_cron;
@@ -146,23 +145,6 @@ async fn find_activity_by_name(activity: BookableActivity) -> Result<()> {
     Ok(())
 }
 
-#[async_recursion]
-async fn run_booking(activity: BookableActivity, num_retries: u8) -> Result<()> {
-    if num_retries == 0 {
-        return Err(Error::msg(activity.name.clone()));
-    } else {
-        match find_activity_by_name(activity.clone()).await {
-            Ok(_) => return Ok(()),
-            Err(e) => {
-                error!("{}", e.to_string());
-                info!("retrying again in 1 minute");
-                tokio::time::sleep(Duration::minutes(1).to_std().unwrap()).await;
-                run_booking(activity, num_retries - 1).await
-            }
-        }
-    }
-}
-
 fn read_json<T: DeserializeOwned>(path: &str) -> T {
     let mut file = File::open(path).unwrap();
     let mut contents = String::new();
@@ -228,7 +210,9 @@ async fn main() -> Result<()> {
                     &wait_time_readable, &activity.name
                 );
                 tokio::time::sleep(sleep_sec).await;
-                run_booking(activity, 3).await.expect("Unable to book!");
+                find_activity_by_name(activity.clone())
+                    .await
+                    .expect("unable to book!");
                 tokio::time::sleep(Duration::minutes(5).to_std().unwrap()).await;
             }
         });

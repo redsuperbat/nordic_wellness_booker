@@ -47,7 +47,7 @@ resource "kubernetes_config_map_v1" "config_map" {
     namespace = local.namespace
   }
   data = {
-    bookable_activities = file("${path.module}/../assets/bookable-activities.json")
+    "bookable-activities.json" = file("${path.module}/../assets/bookable-activities.json")
   }
 }
 
@@ -77,7 +77,7 @@ resource "kubernetes_deployment_v1" "nordic_wellness_booker_deploy" {
           image = "maxrsb/nordic_wellness_booker:${var.image_tag}"
           volume_mount {
             name       = kubernetes_config_map_v1.config_map.metadata[0].name
-            mount_path = "/assets/bookable-activities.json"
+            mount_path = "/app/assets"
           }
           resources {
             requests = {
