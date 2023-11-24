@@ -16,7 +16,7 @@ provider "kubernetes" {
 }
 
 locals {
-  namespace = "rsb-services"
+  namespace = "rsb-apps"
   name      = "nordic-wellness-booker"
 }
 
@@ -33,9 +33,6 @@ variable "image_tag" {
   type = string
 }
 
-variable "rsb_config_api_key" {
-  type = string
-}
 
 resource "kubernetes_namespace_v1" "nordic_wellness_booker_ns" {
   metadata {
