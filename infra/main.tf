@@ -20,15 +20,6 @@ locals {
   name      = "nordic-wellness-booker"
 }
 
-data "terraform_remote_state" "rsb_config" {
-  backend = "kubernetes"
-  config = {
-    namespace     = "terraform-backend"
-    secret_suffix = "rsb-config"
-    config_path   = "~/.kube/config"
-  }
-}
-
 variable "image_tag" {
   type = string
 }
