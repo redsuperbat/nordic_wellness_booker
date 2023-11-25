@@ -2,7 +2,6 @@
   {
     "name": "HOT Yoga 60",
     "id": "16714",
-    "cron_time": "* */5 * * * *",
     "user_id": 765238,
     "day": "sunday",
     "user_name": " Max Netterberg"

@@ -1,16 +1,12 @@
-use std::io::Read;
-use std::{fs::File, str::FromStr};
-
-use chrono::{Datelike, Duration, FixedOffset, Local, NaiveDateTime, TimeZone, Utc, Weekday};
-use cron::Schedule;
-use cron_descriptor::cronparser::cron_expression_descriptor::get_description_cron;
+use chrono::{Datelike, FixedOffset, NaiveDateTime, TimeZone, Utc, Weekday};
 use env_logger::{init_from_env, Env};
 use eyre::{Error, Result};
-use humantime::format_duration;
 use log::{error, info};
 use reqwest::StatusCode;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use std::fs::File;
+use std::io::Read;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BookingsDto {
@@ -158,7 +154,6 @@ fn read_json<T: DeserializeOwned>(path: &str) -> T {
 struct BookableActivity {
     name: String,
     id: String,
-    cron_time: String,
     user_id: u32,
     day: String,
     user_name: String,
@@ -180,49 +175,29 @@ fn parse_weekday(value: &str) -> Option<Weekday> {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     init_from_env(Env::new().default_filter_or("info"));
-
     let bookable_activities: Vec<BookableActivity> = read_json("./assets/bookable-activities.json");
+    let mut handles = vec![];
 
     for activity in bookable_activities {
-        tokio::task::spawn(async move {
-            // create a timezone instance of UTC+2 = Sweden
-            let swe_tz = FixedOffset::east_opt(2 * 3600).expect("Time out of bounds");
-            let schedule = Schedule::from_str(&activity.cron_time).expect(&format!(
-                "unable to parse cron expression {}",
-                &activity.cron_time
-            ));
-            let readable_schedule = get_description_cron(&activity.cron_time)
-                .expect("unable to get readable cron expression");
-
-            info!(
-                "automatic booker triggering [{}] for {} ({}) and activity [{}] ",
-                &readable_schedule, &activity.user_name, &activity.user_id, &activity.name,
-            );
-
-            for next_time in schedule.upcoming(swe_tz) {
-                let activity = activity.clone();
-                let now = Local::now().with_timezone(&swe_tz);
-                let wait_time = next_time - now;
-                let sleep_sec = core::time::Duration::from_secs(wait_time.num_seconds() as u64);
-                let wait_time_readable = format_duration(wait_time.to_std().unwrap()).to_string();
-                info!(
-                    "waiting {} until next check for activity {}",
-                    &wait_time_readable, &activity.name
-                );
-                tokio::time::sleep(sleep_sec).await;
-                match find_activity_by_name(activity.clone()).await {
-                    Ok(()) => (),
-                    Err(err) => error!("{}", err.to_string()),
-                }
+        info!(
+            "checking activity {} for user {}",
+            &activity.name, &activity.user_name
+        );
+        let handle = tokio::task::spawn(async move {
+            let activity = activity.clone();
+            match find_activity_by_name(activity.clone()).await {
+                Ok(()) => (),
+                Err(err) => error!("{}", err.to_string()),
             }
         });
+        handles.push(handle);
     }
-    tokio::task::spawn_blocking(|| {
-        let duration = Duration::days(365)
-            .to_std()
-            .expect("could not convert chrono to std time");
-        std::thread::sleep(duration);
-    })
-    .await?;
+
+    for handle in handles {
+        match handle.await {
+            Ok(_) => (),
+            Err(e) => error!("{}", e.to_string()),
+        };
+    }
     Ok(())
 }

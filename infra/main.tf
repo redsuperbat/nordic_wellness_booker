@@ -51,51 +51,53 @@ resource "kubernetes_config_map_v1" "config_map" {
   }
 }
 
-resource "kubernetes_deployment_v1" "nordic_wellness_booker_deploy" {
+resource "kubernetes_cron_job_v1" "nordic_wellness_booker_job" {
   metadata {
     name      = local.name
     namespace = local.namespace
   }
 
-  spec {
-    replicas = 1
-    selector {
-      match_labels = {
-        app = local.name
-      }
-    }
 
-    template {
+  spec {
+    schedule = "*/5 * * * *"
+    job_template {
       metadata {
-        labels = {
-          app = local.name
-        }
+        name = local.name
       }
       spec {
-        container {
-          name  = local.name
-          image = "maxrsb/nordic_wellness_booker:${var.image_tag}"
-          volume_mount {
-            name       = kubernetes_config_map_v1.config_map.metadata[0].name
-            mount_path = "/app/assets"
-          }
-          resources {
-            requests = {
-              cpu    = "20m"
-              memory = "5Mi"
-            }
-
-            limits = {
-              cpu    = "100m"
-              memory = "20Mi"
+        template {
+          metadata {
+            labels = {
+              app = local.name
             }
           }
-        }
+          spec {
+            container {
+              name  = local.name
+              image = "maxrsb/nordic_wellness_booker:${var.image_tag}"
+              volume_mount {
+                name       = kubernetes_config_map_v1.config_map.metadata[0].name
+                mount_path = "/app/assets"
+              }
+              resources {
+                requests = {
+                  cpu    = "20m"
+                  memory = "5Mi"
+                }
 
-        volume {
-          name = kubernetes_config_map_v1.config_map.metadata[0].name
-          config_map {
-            name = kubernetes_config_map_v1.config_map.metadata[0].name
+                limits = {
+                  cpu    = "100m"
+                  memory = "20Mi"
+                }
+              }
+            }
+
+            volume {
+              name = kubernetes_config_map_v1.config_map.metadata[0].name
+              config_map {
+                name = kubernetes_config_map_v1.config_map.metadata[0].name
+              }
+            }
           }
         }
       }
