@@ -210,9 +210,10 @@ async fn main() -> Result<()> {
                     &wait_time_readable, &activity.name
                 );
                 tokio::time::sleep(sleep_sec).await;
-                find_activity_by_name(activity.clone())
-                    .await
-                    .expect("unable to book!");
+                match find_activity_by_name(activity.clone()).await {
+                    Ok(()) => (),
+                    Err(err) => error!("{}", err.to_string()),
+                }
             }
         });
     }
