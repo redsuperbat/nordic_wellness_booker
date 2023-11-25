@@ -19,6 +19,14 @@ COPY . .
 RUN cargo build --release --bin nordic_wellness_booker
 
 FROM ubuntu:latest
+
+# For SSL certs
+RUN \
+  apt-get update && \
+  apt-get install ca-certificates && \
+  apt-get clean
+
+
 WORKDIR /app
 COPY --from=builder /app/target/release/nordic_wellness_booker .
 CMD ["./nordic_wellness_booker"]
