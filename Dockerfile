@@ -21,10 +21,7 @@ RUN cargo build --release --bin nordic_wellness_booker
 FROM ubuntu:latest
 
 # For SSL certs
-RUN \
-  apt-get update && \
-  apt-get install ca-certificates && \
-  apt-get clean
+RUN apt-get update && apt-get install ca-certificates -y && apt-get clean
 
 
 WORKDIR /app
