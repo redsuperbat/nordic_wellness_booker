@@ -213,7 +213,6 @@ async fn main() -> Result<()> {
                 find_activity_by_name(activity.clone())
                     .await
                     .expect("unable to book!");
-                tokio::time::sleep(Duration::minutes(5).to_std().unwrap()).await;
             }
         });
     }
