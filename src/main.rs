@@ -1,4 +1,4 @@
-use chrono::{Datelike, FixedOffset, NaiveDateTime, TimeZone, Utc, Weekday};
+use chrono::{DateTime, Datelike, FixedOffset, NaiveDateTime, TimeZone, Utc, Weekday};
 use env_logger::{init_from_env, Env};
 use eyre::{Error, Result};
 use log::{error, info};
@@ -88,29 +88,30 @@ async fn book_activity(
         .await
 }
 
-fn parse_date(date_str: &str) -> Option<NaiveDateTime> {
-    match NaiveDateTime::parse_from_str(date_str, "%Y-%m-%dT%H:%M:%S") {
-        Ok(parsed_datetime) => Some(parsed_datetime),
-        Err(_) => None,
-    }
+fn parse_date(date_str: &str) -> DateTime<Utc> {
+    // This is dates in a swedish tz
+    let date_str = date_str.to_string() + "+02:00";
+    let datetime = DateTime::parse_from_rfc3339(&date_str).unwrap();
+    datetime.with_timezone(&Utc)
 }
 
-async fn find_activity_by_name(activity: BookableActivity) -> Result<()> {
+async fn attempt_to_book_activity(activity: BookableActivity) -> Result<()> {
     let response = reqwest::get(get_bookings_url(
         &activity.user_id.to_string(),
         &activity.id,
     ))
     .await?;
+
     let dto: BookingsDto = serde_json::from_str(&response.text().await?)?;
     let body_balance_activity = dto.group_activities.iter().find(|it| {
-        let same_name = it
+        let is_same_name = it
             .name
             .to_lowercase()
             .contains(&activity.name.to_lowercase());
-        let correct_day =
-            parse_date(&it.start_time).unwrap().weekday() == parse_weekday(&activity.day).unwrap();
-        let correct_status = it.status == "Bookable";
-        same_name && correct_day && correct_status
+        let is_correct_day = parse_date(&it.start_time).weekday()
+            == parse_weekday(&activity.day).expect("invalid week day");
+        let is_correct_status = it.status == "Bookable";
+        is_same_name && is_correct_day && is_correct_status
     });
     let nw_activity = match body_balance_activity {
         Some(it) => it,
@@ -184,8 +185,7 @@ async fn main() -> Result<()> {
             &activity.name, &activity.user_name
         );
         let handle = tokio::task::spawn(async move {
-            let activity = activity.clone();
-            match find_activity_by_name(activity.clone()).await {
+            match attempt_to_book_activity(activity).await {
                 Ok(()) => (),
                 Err(err) => error!("{}", err.to_string()),
             }
