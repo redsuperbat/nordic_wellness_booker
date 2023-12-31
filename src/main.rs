@@ -62,7 +62,6 @@ fn get_bookings_url(user_id: &str, activity_id: &str) -> String {
     let now = Utc::now().naive_utc();
     let today = get_nw_date(&now);
     let in_one_week = get_nw_date(&(now + chrono::Duration::weeks(1)));
-    info!("Fetching activities between {today} and {in_one_week}");
     format!("https://api1.nordicwellness.se/GroupActivity/timeslot?clubIds=1&activities={activity_id}&dates={today}%2C{in_one_week}&time=&employees=&times=09%3A00-11%3A00%2C17%3A00-22%3A00&datespan=true&userId={user_id}")
 }
 
@@ -96,11 +95,13 @@ fn parse_date(date_str: &str) -> DateTime<Utc> {
 }
 
 async fn attempt_to_book_activity(activity: BookableActivity) -> Result<()> {
-    let response = reqwest::get(get_bookings_url(
-        &activity.user_id.to_string(),
-        &activity.id,
-    ))
-    .await?;
+    let url = get_bookings_url(&activity.user_id.to_string(), &activity.id);
+    info!(
+        "sending request to get activities with id {} for user {}",
+        &activity.id, &activity.user_name
+    );
+    info!("{}", url);
+    let response = reqwest::get(url).await?;
 
     let dto: BookingsDto = serde_json::from_str(&response.text().await?)?;
     let body_balance_activity = dto.group_activities.iter().find(|it| {
@@ -116,12 +117,12 @@ async fn attempt_to_book_activity(activity: BookableActivity) -> Result<()> {
     let nw_activity = match body_balance_activity {
         Some(it) => it,
         None => {
-            error!(
+            info!(
                 "Unable to find activity with name {} day {} and status {}",
                 &activity.name, &activity.day, "Bookable"
             );
             let json = serde_json::to_string_pretty(&dto).unwrap();
-            error!("{}", json);
+            info!("{}", json);
             return Ok(());
         }
     };
