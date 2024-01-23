@@ -159,6 +159,7 @@ struct BookableActivity {
     user_id: u32,
     day: String,
     user_name: String,
+    disabled: Option<bool>,
 }
 
 fn parse_weekday(value: &str) -> Option<Weekday> {
@@ -178,7 +179,18 @@ fn parse_weekday(value: &str) -> Option<Weekday> {
 async fn main() -> Result<()> {
     init_from_env(Env::new().default_filter_or("info"));
     let bookable_activities: Vec<BookableActivity> = read_json("./assets/bookable-activities.json");
+    let all_bookable_activities = bookable_activities.len();
+    info!("found {} bookable activities", all_bookable_activities);
     let mut handles = vec![];
+    let bookable_activities: Vec<BookableActivity> = bookable_activities
+        .into_iter()
+        .filter(|it| !it.disabled.unwrap_or(false))
+        .collect();
+    info!(
+        "removed {} disabled activities",
+        all_bookable_activities - bookable_activities.len()
+    );
+    info!("trying to book {} activities", bookable_activities.len());
 
     for activity in bookable_activities {
         info!(
